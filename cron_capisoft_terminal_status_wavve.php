@@ -1,14 +1,12 @@
 <?php
-// ============================================
-// CAPISoft -> GHL Stage Sync (THE WAVVE) Cron Job
+// =======================================================
+// CAPISoft -> GHL Terminal Status Sync (THE WAVVE) Cron Job
 // - proyecto_id = 4 (THE WAVVE)
 // - since_date filter by CAPISoft created_at
-// - state file + lock file
-// - match GHL contact by email, fallback phone
-// - update opportunity stage + contact customField capisoft_stage
-// - RE-OPEN RULE: if CAPISoft is OPEN stage and GHL status is abandoned -> set status open
-// - DO NOT TOUCH: if GHL status is won/lost (skip to avoid mixing closed histories)
-// ============================================
+// - state file + shared lock file (avoid collisions with stage cron)
+// - match GHL contact by email, fallback opp search by contactId + pipelineId
+// - update opportunity STATUS only (won | lost | abandoned)
+// =======================================================
 
 if (php_sapi_name() !== 'cli') {
     http_response_code(403);
@@ -34,23 +32,18 @@ $GHL_TOKEN = "GHL_TOKEN";
 $GHL_LOCATION_ID = "GHL_LOCATION_ID";
 $GHL_PIPELINE_ID = "GHL_PIPELINE_ID"; // The Wavve - Flujo de venta
 
-// Custom field ID in GHL for capisoft_stage
-$GHL_CF_CAPISOFT_STAGE_ID = "K0OxBbmucriu7wdZLVmp";
-
-// CAPISoft etapa_id -> GHL pipelineStageId (The WAVVE)
-$CAPI_TO_GHL_STAGE = [
-    46  => '3c8a2475-ef4f-409b-9acf-9e9bf97de627', // Prospecto
-    260 => 'beaf4b07-f014-43cb-8fff-d6f952ae3146', // Buscando contacto
-    47  => '25f85a37-4b6f-4460-a2cc-a70abd62c0b4', // Seguimiento
-    262 => '79d89924-db28-430c-824c-6f32cb343b5f', // Citado -> Cita
-    263 => '10cd5e99-44dc-4fe6-8fb6-976d8a1420f7', // Visita
+// WAVVE: CAPISoft etapa_id terminal -> GHL opportunity status
+// (según tus equivalencias operativas)
+$CAPI_TO_GHL_TERMINAL_STATUS = [
+    49 => 'won',       // Vendido -> Won
+    50 => 'lost',      // Cancelado -> Lost
+    51 => 'abandoned', // Cerrado Perdido -> Abandoned
 ];
 
 // Contadores
 $GLOBALS['api_calls_contacts_search'] = 0;
 $GLOBALS['api_calls_opps_search']     = 0;
 $GLOBALS['api_calls_put_opp']         = 0;
-$GLOBALS['api_calls_put_contact']     = 0;
 
 // ====== CLI ARGS ======
 function get_arg($key)
@@ -140,7 +133,7 @@ function ghl_headers($token, $version)
 }
 
 // Buscar opp en el pipeline (fallback)
-// Usa POST /opportunities/search con filters (payload mínimo válido)
+// Usa POST /opportunities/search con filters (payload válido)
 function ghl_find_opp_by_contact_pipeline($ghlBase, $headers, $locationId, $pipelineId, $contactId, $logFile = null, $clave = null)
 {
     $GLOBALS['api_calls_opps_search']++;
@@ -251,51 +244,12 @@ function ghl_find_contact_and_opp($ghlBase, $headers, $location_id, $pipeline_id
     return [$contact, $foundOpp, ['reason' => 'ok', 'http' => $http]];
 }
 
-function get_cf_value($contact, $customFieldId)
-{
-    $cfs = $contact['customFields'] ?? null;
-    if (! is_array($cfs)) {
-        return null;
-    }
-
-    foreach ($cfs as $cf) {
-        if (($cf['id'] ?? null) === $customFieldId) {
-            return $cf['value'] ?? null;
-        }
-    }
-    return null;
-}
-
-function ghl_update_opportunity_stage($ghlBase, $headers, $opportunityId, $pipelineStageId)
-{
-    $url     = $ghlBase . "/opportunities/" . urlencode($opportunityId);
-    $payload = ["pipelineStageId" => $pipelineStageId];
-
-    $GLOBALS['api_calls_put_opp']++;
-
-    return http_json('PUT', $url, $headers, $payload, 25);
-}
-
 function ghl_update_opportunity_status($ghlBase, $headers, $opportunityId, $status)
 {
     $url     = $ghlBase . "/opportunities/" . urlencode($opportunityId);
     $payload = ["status" => $status]; // open | won | lost | abandoned
 
     $GLOBALS['api_calls_put_opp']++;
-
-    return http_json('PUT', $url, $headers, $payload, 25);
-}
-
-function ghl_update_contact_capisoft_stage($ghlBase, $headers, $contact_id, $customFieldId, $value)
-{
-    $url     = $ghlBase . "/contacts/" . urlencode($contact_id);
-    $payload = [
-        "customFields" => [
-            ["id" => $customFieldId, "value" => $value],
-        ],
-    ];
-
-    $GLOBALS['api_calls_put_contact']++;
 
     return http_json('PUT', $url, $headers, $payload, 25);
 }
@@ -340,8 +294,13 @@ if (! is_dir($logsDir)) {
     mkdir($logsDir, 0755, true);
 }
 
-$stateFile = $storageDir . "/capisoft_state_project_{$proyectoId}.json";
-$logFile   = $logsDir . "/capisoft_sync_wavve.log";
+// Estado separado para terminal
+$stateFile = $storageDir . "/capisoft_state_terminal_project_{$proyectoId}.json";
+
+// Log separado para terminal
+$logFile   = $logsDir . "/capisoft_terminal_status_wavve.log";
+
+// Lock COMPARTIDO con el cron de stages (mismo nombre) para evitar PUT simultáneos
 $lockFile  = $storageDir . "/capisoft_lock_project_{$proyectoId}.lock";
 
 // ====== LOCK ======
@@ -403,14 +362,14 @@ foreach ($data as $o) {
     }
 }
 
-$changesFound            = 0;
-$updatesDone             = 0;
-$skippedNoMap            = 0;
-$skippedNoContact        = 0;
-$skippedNoOpp            = 0;
-$skippedAligned          = 0;
-$skippedReopenNotAllowed = 0;
-$errorsGhl               = 0;
+$changesFound        = 0;
+$updatesDone         = 0;
+$skippedNotTerminal  = 0;
+$skippedNoContact    = 0;
+$skippedNoOpp        = 0;
+$skippedAligned      = 0;
+$skippedNoMap        = 0;
+$errorsGhl           = 0;
 
 $changes = [];
 
@@ -429,7 +388,7 @@ foreach ($filtered as $o) {
         'responsable' => $o['responsable'] ?? null,
         'emails'      => $o['emails'] ?? null,
         'telefonos'   => $o['telefonos'] ?? null,
-        'id'          => $o['id'] ?? null,
+        'id'          => $o['id'] ?? null, // capisoft opp id
     ];
 
     $prev = $state['by_clave'][$clave] ?? null;
@@ -443,117 +402,15 @@ foreach ($filtered as $o) {
     $changed = ($prev['etapa_id'] ?? null) != ($current['etapa_id'] ?? null)
         || ($prev['etapa'] ?? null) != ($current['etapa'] ?? null);
 
-    $capEtapaId    = (int) ($current['etapa_id'] ?? 0);
-    $targetStageId = $CAPI_TO_GHL_STAGE[$capEtapaId] ?? null;
+    $capEtapaId   = (int) ($current['etapa_id'] ?? 0);
+    $targetStatus = $CAPI_TO_GHL_TERMINAL_STATUS[$capEtapaId] ?? null;
 
-    // Si no hay mapeo, no podemos sincronizar ni por cambio ni por reversión
-    if (! $targetStageId) {
+    // Solo nos interesan terminales
+    if (! $targetStatus) {
         if ($changed) {
             $changesFound++;
-            $skippedNoMap++;
-            log_line($logFile, date('c') . " SKIP NO_MAP clave={$clave} etapa_id={$capEtapaId} etapa=\"{$current['etapa']}\"");
+            $skippedNotTerminal++;
         }
-        $state['by_clave'][$clave] = $current;
-        continue;
-    }
-
-    // Intentaremos reconciliar SIEMPRE que exista el lead en state,
-    // para poder revertir cambios manuales en GHL aunque CAPISoft no haya cambiado.
-    $email = $current['emails'] ?? null;
-
-    [$contact, $opp, $meta] = ghl_find_contact_and_opp(
-        $GHL_BASE_URL, $ghlHeaders, $GHL_LOCATION_ID, $GHL_PIPELINE_ID, $email, $logFile, $clave
-    );
-
-    if (! $contact) {
-        if ($changed) {
-            $changesFound++;
-        }
-
-        $skippedNoContact++;
-        $r     = $meta['reason'] ?? 'unknown';
-        $httpm = $meta['http'] ?? '';
-        $errm  = $meta['err'] ?? '';
-        log_line($logFile, date('c') . " SKIP NO_CONTACT reason={$r} clave={$clave} email={$email} http={$httpm} err={$errm}");
-        $state['by_clave'][$clave] = $current;
-        continue;
-    }
-
-    $contact_id = $contact['id'] ?? null;
-    if (! $contact_id) {
-        if ($changed) {
-            $changesFound++;
-        }
-
-        $skippedNoContact++;
-        log_line($logFile, date('c') . " SKIP NO_CONTACT_ID clave={$clave} email={$email}");
-        $state['by_clave'][$clave] = $current;
-        continue;
-    }
-
-    if (! $opp || ! is_array($opp)) {
-
-        // fallback: buscar opportunity por contactId + pipelineId
-        [$opp2, $m2] = ghl_find_opp_by_contact_pipeline(
-            $GHL_BASE_URL, $ghlHeaders, $GHL_LOCATION_ID, $GHL_PIPELINE_ID, $contact_id, $logFile, $clave
-        );
-
-        if (! $opp2 || ! is_array($opp2)) {
-            if ($changed) {$changesFound++;}
-
-            $skippedNoOpp++;
-            $r2 = $m2['reason'] ?? 'unknown';
-            $h2 = $m2['http'] ?? '';
-            $e2 = $m2['err'] ?? '';
-            log_line($logFile, date('c') . " SKIP NO_OPP reason={$r2} clave={$clave} contact={$contact_id} pipeline={$GHL_PIPELINE_ID} http={$h2} err={$e2}");
-
-            $state['by_clave'][$clave] = $current;
-            continue;
-        }
-
-        $opp = $opp2;
-    }
-
-    $oppId          = $opp['id'] ?? null;
-    $currentStageId = $opp['pipelineStageId'] ?? null;
-    $currentStatus  = $opp['status'] ?? null;
-
-    if (! $oppId) {
-        if ($changed) {
-            $changesFound++;
-        }
-
-        $skippedNoOpp++;
-        log_line($logFile, date('c') . " SKIP NO_OPP_ID clave={$clave} contact={$contact_id}");
-        $state['by_clave'][$clave] = $current;
-        continue;
-    }
-
-    // ====== RE-OPEN RULE (solo abandoned -> open) ======
-    // Si CAPISoft está en etapa OPEN (tiene targetStageId) pero la opportunity está Abandoned,
-    // reabrimos a Open para que el stage update tenga sentido.
-    if ($targetStageId && $currentStatus === 'abandoned') {
-
-        [$rh, $rb, $re] = ghl_update_opportunity_status(
-            $GHL_BASE_URL, $ghlHeaders, $oppId, 'open'
-        );
-
-        if ($re || $rh >= 400) {
-            $errorsGhl++;
-            log_line($logFile, date('c') . " ERROR GHL_OPP_REOPEN clave={$clave} opp={$oppId} http={$rh} err={$re} body=" . substr((string) $rb, 0, 500));
-            $state['by_clave'][$clave] = $current;
-            continue;
-        }
-
-        $currentStatus = 'open';
-        log_line($logFile, date('c') . " OK GHL_OPP_REOPEN clave={$clave} opp={$oppId} status=open (from abandoned)");
-    }
-
-    // Regla explícita: nunca reabrimos automáticamente lost o won.
-    // (y no movemos stage, para no mezclar históricos cerrados)
-    if ($currentStatus === 'lost' || $currentStatus === 'won') {
-        $skippedReopenNotAllowed++;
-        log_line($logFile, date('c') . " SKIP REOPEN_NOT_ALLOWED clave={$clave} opp={$oppId} status={$currentStatus} capi_etapa_id={$capEtapaId}");
         $state['by_clave'][$clave] = $current;
         continue;
     }
@@ -568,69 +425,83 @@ foreach ($filtered as $o) {
             'to'          => ['etapa_id' => $current['etapa_id'], 'etapa' => $current['etapa']],
             'email'       => $current['emails'],
             'tel'         => $current['telefonos'],
+            'target'      => $targetStatus,
         ];
     }
 
-    // Siempre intentamos mantener capisoft_stage como auditoría
-    $capisoftStageValue = $proyectoId . "|" . $capEtapaId . "|" . ($current['etapa'] ?? '');
+    $email = $current['emails'] ?? null;
 
-    // Reconciliación SOLO POR STAGE
-    $needsStageSync = ($currentStageId !== $targetStageId);
+    [$contact, $opp, $meta] = ghl_find_contact_and_opp(
+        $GHL_BASE_URL, $ghlHeaders, $GHL_LOCATION_ID, $GHL_PIPELINE_ID, $email, $logFile, $clave
+    );
 
-    // 1) Si GHL ya está alineado (stage), no tocamos opportunity.
-    // Solo aseguramos custom field si hace falta.
-    if (! $needsStageSync) {
+    if (! $contact) {
+        $skippedNoContact++;
+        $r     = $meta['reason'] ?? 'unknown';
+        $httpm = $meta['http'] ?? '';
+        $errm  = $meta['err'] ?? '';
+        log_line($logFile, date('c') . " SKIP NO_CONTACT reason={$r} clave={$clave} email={$email} http={$httpm} err={$errm}");
+        $state['by_clave'][$clave] = $current;
+        continue;
+    }
 
-        $existing = get_cf_value($contact, $GHL_CF_CAPISOFT_STAGE_ID);
+    $contact_id = $contact['id'] ?? null;
+    if (! $contact_id) {
+        $skippedNoContact++;
+        log_line($logFile, date('c') . " SKIP NO_CONTACT_ID clave={$clave} email={$email}");
+        $state['by_clave'][$clave] = $current;
+        continue;
+    }
 
-        // NO-OP total: ni opp ni custom field requieren cambio
-        if ($existing === $capisoftStageValue) {
-            $skippedAligned++;
+    if (! $opp || ! is_array($opp)) {
+
+        // fallback: buscar opportunity por contactId + pipelineId
+        [$opp2, $m2] = ghl_find_opp_by_contact_pipeline(
+            $GHL_BASE_URL, $ghlHeaders, $GHL_LOCATION_ID, $GHL_PIPELINE_ID, $contact_id, $logFile, $clave
+        );
+
+        if (! $opp2 || ! is_array($opp2)) {
+            $skippedNoOpp++;
+            $r2 = $m2['reason'] ?? 'unknown';
+            $h2 = $m2['http'] ?? '';
+            $e2 = $m2['err'] ?? '';
+            log_line($logFile, date('c') . " SKIP NO_OPP reason={$r2} clave={$clave} contact={$contact_id} pipeline={$GHL_PIPELINE_ID} http={$h2} err={$e2}");
             $state['by_clave'][$clave] = $current;
             continue;
         }
 
-        // Aquí SÍ hay acción: solo update del custom field
-        [$ch, $cb, $ce] = ghl_update_contact_capisoft_stage(
-            $GHL_BASE_URL, $ghlHeaders, $contact_id, $GHL_CF_CAPISOFT_STAGE_ID, $capisoftStageValue
-        );
+        $opp = $opp2;
+    }
 
-        if ($ce || $ch >= 400) {
-            $errorsGhl++;
-            log_line($logFile, date('c') . " ERROR GHL_CONTACT_UPDATE clave={$clave} contact={$contact_id} http={$ch} err={$ce}");
-        } else {
-            $updatesDone++;
-            log_line($logFile, date('c') . " OK GHL_CONTACT_ONLY clave={$clave} contact={$contact_id} capisoft_stage=\"{$capisoftStageValue}\"");
-        }
+    $oppId         = $opp['id'] ?? null;
+    $currentStatus = $opp['status'] ?? null;
 
+    if (! $oppId) {
+        $skippedNoOpp++;
+        log_line($logFile, date('c') . " SKIP NO_OPP_ID clave={$clave} contact={$contact_id}");
         $state['by_clave'][$clave] = $current;
         continue;
     }
 
-    // 2) Forzamos stage
-    [$oh, $ob, $oe] = ghl_update_opportunity_stage($GHL_BASE_URL, $ghlHeaders, $oppId, $targetStageId);
-
-    if ($oe || $oh >= 400) {
-        $errorsGhl++;
-        log_line($logFile, date('c') . " ERROR GHL_OPP_STAGE_UPDATE clave={$clave} opp={$oppId} http={$oh} err={$oe} body=" . substr((string) $ob, 0, 500));
+    // Si ya está alineado, skip
+    if ($currentStatus === $targetStatus) {
+        $skippedAligned++;
         $state['by_clave'][$clave] = $current;
         continue;
     }
 
-    log_line($logFile, date('c') . " OK GHL_OPP_STAGE_UPDATE clave={$clave} opp={$oppId} stage={$targetStageId} (reconcile)");
+    // Actualizamos status
+    [$sh, $sb, $se] = ghl_update_opportunity_status($GHL_BASE_URL, $ghlHeaders, $oppId, $targetStatus);
 
-    // 3) Actualizamos el custom field como auditoría
-    [$ch, $cb, $ce] = ghl_update_contact_capisoft_stage(
-        $GHL_BASE_URL, $ghlHeaders, $contact_id, $GHL_CF_CAPISOFT_STAGE_ID, $capisoftStageValue
-    );
-
-    if ($ce || $ch >= 400) {
+    if ($se || $sh >= 400) {
         $errorsGhl++;
-        log_line($logFile, date('c') . " ERROR GHL_CONTACT_UPDATE clave={$clave} contact={$contact_id} http={$ch} err={$ce} body=" . substr((string) $cb, 0, 500));
-    } else {
-        $updatesDone++;
-        log_line($logFile, date('c') . " OK GHL_CONTACT_UPDATE clave={$clave} contact={$contact_id} capisoft_stage=\"{$capisoftStageValue}\"");
+        log_line($logFile, date('c') . " ERROR GHL_OPP_STATUS_UPDATE clave={$clave} opp={$oppId} http={$sh} err={$se} body=" . substr((string) $sb, 0, 500));
+        $state['by_clave'][$clave] = $current;
+        continue;
     }
+
+    $updatesDone++;
+    log_line($logFile, date('c') . " OK GHL_OPP_STATUS_UPDATE clave={$clave} opp={$oppId} status={$targetStatus} (reconcile)");
 
     $state['by_clave'][$clave] = $current;
     continue;
@@ -646,28 +517,27 @@ fclose($lockHandle);
 $elapsedMs = (int) ((microtime(true) - $startedAt) * 1000);
 
 echo json_encode([
-    'ok'                        => true,
-    'proyecto_id'               => $proyectoId,
-    'since_date'                => $sinceDate,
-    'total_capisoft'            => count($data),
-    'observed_created_since'    => count($filtered),
-    'state_entries_before'      => $beforeCount,
-    'state_entries_after'       => count($state['by_clave']),
-    'changes_found'             => $changesFound,
-    'updates_done'              => $updatesDone,
-    'skipped_no_map'            => $skippedNoMap,
-    'skipped_no_contact'        => $skippedNoContact,
-    'skipped_no_opp'            => $skippedNoOpp,
-    'skipped_same_stage'        => $skippedAligned,
-    'skipped_reopen_not_allowed'=> $skippedReopenNotAllowed,
-    'errors_ghl'                => $errorsGhl,
-    'elapsed_ms'                => $elapsedMs,
-    'changes'                   => $changes,
-    'api_calls'                 => [
+    'ok'                     => true,
+    'proyecto_id'            => $proyectoId,
+    'since_date'             => $sinceDate,
+    'total_capisoft'         => count($data),
+    'observed_created_since' => count($filtered),
+    'state_entries_before'   => $beforeCount,
+    'state_entries_after'    => count($state['by_clave']),
+    'changes_found'          => $changesFound,
+    'updates_done'           => $updatesDone,
+    'skipped_not_terminal'   => $skippedNotTerminal,
+    'skipped_no_contact'     => $skippedNoContact,
+    'skipped_no_opp'         => $skippedNoOpp,
+    'skipped_aligned'        => $skippedAligned,
+    'skipped_no_map'         => $skippedNoMap,
+    'errors_ghl'             => $errorsGhl,
+    'elapsed_ms'             => $elapsedMs,
+    'changes'                => $changes,
+    'api_calls'              => [
         'contacts_search' => $GLOBALS['api_calls_contacts_search'],
         'opps_search'     => $GLOBALS['api_calls_opps_search'],
         'put_opp'         => $GLOBALS['api_calls_put_opp'],
-        'put_contact'     => $GLOBALS['api_calls_put_contact'],
     ],
 ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
