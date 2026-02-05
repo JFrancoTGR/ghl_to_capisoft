@@ -19,7 +19,7 @@ $defaultSinceDate  = '2025-12-30'; // YYYY-MM-DD
 
 // CAPISoft
 $CAPISOFT_BASE  = "https://api-3.capisoftware.com.mx/eu/capi-b/public/api/v2/ventas/oportunidades";
-$CAPISOFT_TOKEN = getenv('CAPISOFT_TOKEN') ?: 'CAPISOFT_TOKEN'; // optional
+$CAPISOFT_TOKEN = getenv('CAPISOFT_TOKEN') ?: 'CAPISOFT_TOKEN'; 
 
 // GHL (LeadConnector API v2)
 $GHL_BASE_URL = "https://services.leadconnectorhq.com";
@@ -304,8 +304,14 @@ $logFile   = $logsDir . "/capisoft_terminal_status_wavve.log";
 $lockFile  = $storageDir . "/capisoft_lock_project_{$proyectoId}.lock";
 
 // ====== LOCK ======
+// $lockHandle = fopen($lockFile, 'c');
+// if (! $lockHandle || ! flock($lockHandle, LOCK_EX | LOCK_NB)) {
+//     exit(0);
+// }
+
 $lockHandle = fopen($lockFile, 'c');
 if (! $lockHandle || ! flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    file_put_contents(__DIR__ . "/logs/terminal_lock_skips.log", date('c') . " LOCK_BUSY\n", FILE_APPEND);
     exit(0);
 }
 

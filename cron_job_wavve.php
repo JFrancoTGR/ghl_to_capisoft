@@ -21,7 +21,7 @@ $defaultSinceDate  = '2025-12-30'; // YYYY-MM-DD
 
 // CAPISoft
 $CAPISOFT_BASE  = "https://api-3.capisoftware.com.mx/eu/capi-b/public/api/v2/ventas/oportunidades";
-$CAPISOFT_TOKEN = getenv('CAPISOFT_TOKEN') ?: 'CAPISOFT_TOKEN'; // optional
+$CAPISOFT_TOKEN = getenv('CAPISOFT_TOKEN') ?: 'CAPISOFT_TOKEN';
 
 // GHL (LeadConnector API v2)
 $GHL_BASE_URL = "https://services.leadconnectorhq.com";
@@ -32,7 +32,7 @@ $GHL_TOKEN = "GHL_TOKEN";
 
 // The WAVVE location + pipeline
 $GHL_LOCATION_ID = "GHL_LOCATION_ID";
-$GHL_PIPELINE_ID = "GHL_PIPELINE_ID"; // The Wavve - Flujo de venta
+$GHL_PIPELINE_ID = "GHL_PIPLINE_ID"; // The Wavve - Flujo de venta
 
 // Custom field ID in GHL for capisoft_stage
 $GHL_CF_CAPISOFT_STAGE_ID = "K0OxBbmucriu7wdZLVmp";

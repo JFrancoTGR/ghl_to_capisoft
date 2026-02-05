@@ -8,30 +8,43 @@ date_default_timezone_set('UTC');
 // ========= CONFIG =========
 const LOG_FILE          = __DIR__ . '/ghl_middleware.log';
 const CAPISOFT_ENDPOINT = 'https://api-3.capisoftware.com.mx/eu/capi-b/public/api/services/social_media/catch';
-const CAPISOFT_TOKEN    = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjQ2YzkxZWFjMmI3ZDc3MTFkNTU3OWY1MGM0MWE3OTNjMjAzOTMzMTQzMDBmNzc1ODMyNGU2YmIyMmRmYjBjMGQzMjBhZTkyNzllOTViODRhIn0.eyJhdWQiOiIzIiwianRpIjoiNDZjOTFlYWMyYjdkNzcxMWQ1NTc5ZjUwYzQxYTc5M2MyMDM5MzMxNDMwMGY3NzU4MzI0ZTZiYjIyZGZiMGMwZDMyMGFlOTI3OWU5NWI4NGEiLCJpYXQiOjE3NDkxNjc5NTYsIm5iZiI6MTc0OTE2Nzk1NiwiZXhwIjoxODkzNDU1OTU2LCJzdWIiOiIzMCIsInNjb3BlcyI6W119.efu0FNk1f5XAEYUFCeKOtRbrpi4gyX5xd_0zhwSu5eesHuAjgH-kKfD3Ef8qKh9kJJyOAsLKiFlmzGUXz0-2yXynvLijcuPfV0r9YXEDdNlB3l58-N4tIWyPr1gwrwNxrcSQBIH2gXNIpqFhEaUJxxS0qMnZIdgcVaeWdtVCOJTlq9sSOYNEp0N6wlqDRUk9xzRQ_dv1zvQZ1R3CMjwt-UAASEYZq518SMTcMFP_MhYisoHjFC22cODFSH5sxa89R680eTod0DQX28HKfDjy0c0erCrbzW0Ij5X0b1-UOE_qiojO0GxKcpyf7_HUWCXyoKVQQf6iW5f8cD7WYITYJcM_JjVUEbXn3s8gu-ktL8T1Ah303UCGxtKGjbWIwP68antOznWJcHIbMGJ9l_rbbHiY3NZD0ypiD9YGwsc_6Sl0aN-DPdU7q9W-PLqM8bHBORgPjlUt-jmfUlrfeRfZhtuFdpJxn5kOhIN3ClyoVztUYwX9EK_ad-mtf4qgkwaVDhAwoeWwpZU9AAAVUZv5xT9X5IEJZ5TbxlUFKWg9TlLPGMwIUAoalferbCNdWopoChE874KkHpPjvM0ONBN863HuBJlG7FePi7Nh-jlUWP4qefSWF8L8Id6GO9BeXUcpXbPHelpQR3oni1X_SHKTbeR_ShWSD168s1OkTy03qwY'; // ejemplo: getenv('CAPISOFT_TOKEN');
+const CAPISOFT_TOKEN    = 'CAPISOFT_TOKEN'; 
 
 // ===== Project map: GHL capisoft_id_project => legible =====
 const PROJECT_MAP = [
-    3 => 'NAOS',
-    4 => 'THE WAVVE',
+    // Proyectos Tijuana
+    3  => 'NAOS',
+    4  => 'THE WAVVE',
+
+    // Proyectos CDMX
+    1  => 'JUÁREZ',
+    2  => 'LIVERPOOL',
+    5  => 'CHILPANCINGO',
+    19 => 'TABACALERA',
 ];
 
 // Mapeo recomendado: por email del owner (user.email) => responsable_id
 $OWNER_EMAIL_TO_RESPONSABLE_ID = [
 
-    //'jennifer.banuelos@brg.mx' => 144,
-    'valeria.guerrero@brg.mx'   => 145,
-    'sandra.guerrero@brg.mx'    => 148,
-    'cinthya.pinkus@brg.mx'     => 149,
-    'liz.osuna@brg.mx'          => 150,
-    'erick.bada@brg.mx'         => 151,
-    'alejandra.garrido@brg.mx'  => 187,
-    'jesus.gallardo@brg.mx'     => 190,
-    'karen.parra@brg.mx'        => 212,
-    'verenice.maldonado@brg.mx' => 216,
-    'fernanda.gracia@brg.mx'    => 217,
-    'cristian.soto@brg.mx'      => 218,
-    'marco.morales@brg.mx'      => 222,
+    // ASESORES TIJUANA
+    'valeria.guerrero@brg.mx'           => 145,
+    'sandra.guerrero@brg.mx'            => 148,
+    'cinthya.pinkus@brg.mx'             => 149,
+    'liz.osuna@brg.mx'                  => 150,
+    'erick.bada@brg.mx'                 => 151,
+    'alejandra.garrido@brg.mx'          => 187,
+    'jesus.gallardo@brg.mx'             => 190,
+    'karen.parra@brg.mx'                => 212,
+    'verenice.maldonado@brg.mx'         => 216,
+    'fernanda.gracia@brg.mx'            => 217,
+    'cristian.soto@brg.mx'              => 218,
+    'marco.morales@brg.mx'              => 222,
+
+    // ASESORES CDMX
+    'djalife@estrategiaurbana.com.mx'   => 159,
+    'rsantiago@estrategiaurbana.com.mx' => 63,
+    'jarceo@estrategiaurbana.com.mx'    => 65,
+    'ssantos@estrategiaurbana.com.mx'   => 142,
 ];
 
 // ========= HELPERS =========
