@@ -35,9 +35,9 @@ $GHL_PIPELINE_ID = "GHL_PIPELINE_ID"; // NAOS - Flujo de venta
 // NAOS: CAPISoft etapa_id terminal -> GHL opportunity status
 // (según tus equivalencias operativas)
 $CAPI_TO_GHL_TERMINAL_STATUS = [
-    49 => 'won',       // Vendido -> Won
-    50 => 'lost',      // Cancelado -> Lost
-    51 => 'abandoned', // Cerrado Perdido -> Abandoned
+    34 => 'won',       // Vendido -> Won
+    35 => 'lost',      // Cancelado -> Lost
+    36 => 'abandoned', // Cerrado Perdido -> Abandoned
 ];
 
 // Contadores
