@@ -32,7 +32,7 @@ $GHL_TOKEN = "GHL_TOKEN";
 
 // The WAVVE location + pipeline
 $GHL_LOCATION_ID = "GHL_LOCATION_ID";
-$GHL_PIPELINE_ID = "GHL_PIPLINE_ID"; // The Wavve - Flujo de venta
+$GHL_PIPELINE_ID = "GHL_PIPELINE_ID"; // The Wavve - Flujo de venta
 
 // Custom field ID in GHL for capisoft_stage
 $GHL_CF_CAPISOFT_STAGE_ID = "K0OxBbmucriu7wdZLVmp";
